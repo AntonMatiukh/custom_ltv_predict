@@ -24,9 +24,6 @@ class Prediction:
     :type df: pandas.core.frame.DataFrame
     """
 
-    # def __init__(self, df):
-        # self.df = df
-
     @staticmethod
     def calc_slope_intercept(x, y):
         """
@@ -83,7 +80,7 @@ class Prediction:
 
         # Create lifetime column
         df['date_'] = pd.to_datetime(df['date_'])
-        df['date_reg'] = pd.to_datetime(df['date_'])
+        df['date_reg'] = pd.to_datetime(df['date_reg'])
         df['lifetime'] = (df['date_'] - df['date_reg']).dt.days
 
         # Check and delete rows with negative lifetimes
@@ -94,6 +91,29 @@ class Prediction:
             print('Negative lifetimes were deleted from df')
 
         return df
+
+    def df_calc(self, df, target_column, k, n, df_list):
+        """
+        Function for calculations
+
+        :param df:
+        :param append_list:
+        :return:
+        """
+
+        df_tmp_g = df.groupby('lifetime', as_index=False).sum()
+        dict_coeff = {}
+        dict_coeff['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
+                             str(df['date_'].max()).split(' ')[0]
+        for c in df_tmp_g.drop(columns=['lifetime', target_column]):
+            df_tmp_g[c] = df_tmp_g[c].cumsum()
+            coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
+            dict_coeff[f'{c}_a'], dict_coeff[f'{c}_b'] = coeffs[0], coeffs[1]
+        dict_coeff[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
+        dict_coeff['days_in_cohort'] = k
+        if n is not None:
+            dict_coeff['lifetime'] = n
+        df_list.append(dict_coeff)
 
     def get_final_df(self, df, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime, target_column):
         """
@@ -112,6 +132,7 @@ class Prediction:
                 for d in df['date_reg'].unique():
                     df_tmp = df[(df['date_reg'] >= d)
                                      & (df['date_'] <= d + pd.DateOffset(k))]
+                    self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
         else:
             for k in log_progress(range(min_cohort_days, max_cohort_days)):
                 for n in range(min_lifetime, max_lifetime):
@@ -119,24 +140,11 @@ class Prediction:
                         df_tmp = df[(df['date_reg'] >= d)
                                          & (df['date_reg'] <= d + pd.DateOffset(k))
                                          & (df['date_'] <= d + pd.DateOffset(k+n))]
+                        self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
 
-        df_tmp_g = df_tmp.groupby('lifetime', as_index=False).sum()
-        dict_coeff = {}
-        dict_coeff['date'] = str(df_tmp['date_'].min()).split(' ')[0] + ' - ' + str(df_tmp['date_'].max()).split(' ')[0]
-        for c in df_tmp_g.drop(columns=['lifetime',target_column]):
-            df_tmp_g[c] = df_tmp_g[c].cumsum()
-            coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
-            dict_coeff[f'{c}_a'], dict_coeff[f'{c}_b'] = coeffs[0], coeffs[1]
-        dict_coeff[target_column] = df_tmp.groupby('date_reg', as_index=False)[target_column].max().sum()
-        df_list.append(dict_coeff)
+        print(df_list)
 
-        if is_closed_lifetime == 0:
-            dict_coeff['days_in_cohort'] = k
-        else:
-            dict_coeff['days_in_cohort'] = k
-            dict_coeff['lifetime'] = n
-
-        return pd.DataFrame(dict_coeff).drop_duplicates()
+        return pd.DataFrame(df_list).drop_duplicates()
 
     def make_basic_predict(self,df,test_size,random_state,target_column):
         """
@@ -160,6 +168,19 @@ class Prediction:
         model.fit(train_dataset)
 
         pred = model.predict(X_test)
+
+        sorted_feature_importance = model.feature_importances_.argsort()
+        plt.barh(df.drop(columns=['date', target_column]).columns,
+                 model.feature_importances_[sorted_feature_importance],
+                 color='turquoise')
+        plt.xlabel("CatBoost Feature Importance")
+        plt.show()
+
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_test)
+        shap.summary_plot(shap_values, X_test,
+                          feature_names=df.drop(columns=['date', target_column]).columns)
+        plt.show()
 
         return pred, self.regression_basic_metrics(y_test, pred)
 
