@@ -103,7 +103,7 @@ class Prediction:
         :rtype: pandas.core.frame.DataFrame
         """
 
-        df = self.check_df(df)
+        df = self.check_df(df=df)
 
         df_list = []
 
