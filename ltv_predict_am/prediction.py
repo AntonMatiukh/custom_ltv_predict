@@ -66,7 +66,7 @@ class Prediction:
         return metrics_dict
 
     @staticmethod
-    def check_df(self, df):
+    def check_df(df):
         """
         Convert columns to dates. Create lifetime column. Check columns types and data in df.
 
@@ -160,6 +160,8 @@ class Prediction:
         model.fit(train_dataset)
 
         pred = model.predict(X_test)
+
+        return pred, self.regression_basic_metrics(y_test, pred)
 
 
 
