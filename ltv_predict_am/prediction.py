@@ -142,8 +142,6 @@ class Prediction:
                                          & (df['date_'] <= d + pd.DateOffset(k+n))]
                         self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
 
-        print(df_list)
-
         return pd.DataFrame(df_list).drop_duplicates()
 
     def make_basic_predict(self,df,test_size,random_state,target_column):
