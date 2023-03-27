@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 with open('requirements.txt') as req_file:
       install_reqs = req_file.readlines()
 
-setup(name = 'amltvpredict',
+setup(name = 'am-ltv-predict',
       description = 'Custom attempt to predict LTV',
       packages = find_packages(),
       install_requires = install_reqs,
