@@ -24,6 +24,9 @@ class Prediction:
     :type df: pandas.core.frame.DataFrame
     """
 
+    def __init__(self, df):
+        self.df = df
+
     @staticmethod
     def calc_slope_intercept(x, y):
         """
@@ -62,8 +65,7 @@ class Prediction:
                                       np.quantile(diff_na, 0.975)]}
         return metrics_dict
 
-    @staticmethod
-    def check_df(df):
+    def check_df(self):
         """
         Convert columns to dates. Create lifetime column. Check columns types and data in df.
 
@@ -72,25 +74,24 @@ class Prediction:
         """
 
         # Check df for N/A
-        if df.isna().sum().sum() == 0:
+        if self.df.isna().sum().sum() == 0:
             pass
         else:
-            df = df.dropna()
+            df = self.df.dropna()
             print('N/A values were deleted from df')
 
         # Create lifetime column
-        df['date_'] = pd.to_datetime(df['date_'])
-        df['date_reg'] = pd.to_datetime(df['date_reg'])
-        df['lifetime'] = (df['date_'] - df['date_reg']).dt.days
+        self.df['date_'] = pd.to_datetime(self.df['date_'])
+        self.df['date_reg'] = pd.to_datetime(self.df['date_reg'])
+        self.df['lifetime'] = (self.df['date_'] - self.df['date_reg']).dt.days
 
         # Check and delete rows with negative lifetimes
-        if df.query('lifetime < 0').empty:
+        if self.df.query('lifetime < 0').empty:
             pass
         else:
-            df = df.query('lifetime >= 0')
+            self.df = self.df.query('lifetime >= 0')
             print('Negative lifetimes were deleted from df')
 
-        return df
 
     def df_calc(self, df, target_column, k, n, df_list):
         """
@@ -102,20 +103,25 @@ class Prediction:
         """
 
         df_tmp_g = df.groupby('lifetime', as_index=False).sum()
-        dict_coeff = {}
-        dict_coeff['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
-                             str(df['date_'].max()).split(' ')[0]
+
         for c in df_tmp_g.drop(columns=['lifetime', target_column]):
             df_tmp_g[c] = df_tmp_g[c].cumsum()
             coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
-            dict_coeff[f'{c}_a'], dict_coeff[f'{c}_b'] = coeffs[0], coeffs[1]
-        dict_coeff[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
-        dict_coeff['days_in_cohort'] = k
-        if n is not None:
-            dict_coeff['lifetime'] = n
-        df_list.append(dict_coeff)
+            df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
+            df_tmp_g = df_tmp_g.drop(columns=c)
 
-    def get_final_df(self, df, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime, target_column):
+        df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
+                           str(df['date_'].max()).split(' ')[0]
+        df_tmp_g[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
+        df_tmp_g['days_in_cohort'] = k
+        if n is not None:
+            df_tmp_g['lifetime'] = n
+
+        df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
+
+        df_list.append(df_tmp_g)
+
+    def get_final_df(self, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime, target_column):
         """
         Create/replace new features
 
@@ -123,62 +129,121 @@ class Prediction:
         :rtype: pandas.core.frame.DataFrame
         """
 
-        df = self.check_df(df=df)
+        self.check_df()
 
         df_list = []
 
         if is_closed_lifetime == 0:
             for k in log_progress(range(min_cohort_days, max_cohort_days)):
-                for d in df['date_reg'].unique():
-                    df_tmp = df[(df['date_reg'] >= d)
-                                     & (df['date_'] <= d + pd.DateOffset(k))]
+                for d in self.df['date_reg'].unique():
+                    df_tmp = self.df[(self.df['date_reg'] >= d)
+                                     & (self.df['date_'] <= d + pd.DateOffset(k))]
                     self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
         else:
             for k in log_progress(range(min_cohort_days, max_cohort_days)):
                 for n in range(min_lifetime, max_lifetime):
-                    for d in df['date_reg'].unique():
-                        df_tmp = df[(df['date_reg'] >= d)
-                                         & (df['date_reg'] <= d + pd.DateOffset(k))
-                                         & (df['date_'] <= d + pd.DateOffset(k+n))]
-                        self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
+                    for d in self.df['date_reg'].unique():
+                        df_tmp = self.df[(self.df['date_reg'] >= d)
+                                         & (self.df['date_reg'] <= d + pd.DateOffset(k))
+                                         & (self.df['date_'] <= d + pd.DateOffset(k+n))]
+                        self.df_calc(df=df_tmp, target_column=target_column, k=k, n=n, df_list=df_list)
 
-        return pd.DataFrame(df_list).drop_duplicates()
+        self.df = pd.concat(df_list).drop_duplicates()
 
-    def make_basic_predict(self,df,test_size,random_state,target_column):
+        return self.df
+
+    def make_basic_predict(self,test_size,random_state,target_column,plot_importance,plot_detailed_predict):
         """
+        Function to make basic predict based on CatBoostRegressor
 
         :param df: Final dataframe
         :param test_size: Test size for train/test
         :param random_state: Random state for train/test
         :return: predict, dictionary with regression metrics
-        :rtype:
+        :rtype: list, dict
         """
 
-        X_train, X_test, y_train, y_test = train_test_split(df.drop(columns=['date', target_column]),
-                                                            df[target_column], test_size=test_size,
+        X_train, X_test, y_train, y_test = train_test_split(self.df.drop(columns=['date', target_column]),
+                                                            self.df[target_column],
+                                                            test_size=test_size,
                                                             random_state=random_state)
 
         train_dataset = cb.Pool(X_train, y_train)
         test_dataset = cb.Pool(X_test, y_test)
 
-        model = cb.CatBoostRegressor(loss_function='RMSE')
+        model = cb.CatBoostRegressor(loss_function='RMSE', silent=True)
 
         model.fit(train_dataset)
 
         pred = model.predict(X_test)
 
-        sorted_feature_importance = model.feature_importances_.argsort()
-        plt.barh(df.drop(columns=['date', target_column]).columns,
-                 model.feature_importances_[sorted_feature_importance],
-                 color='turquoise')
-        plt.xlabel("CatBoost Feature Importance")
-        plt.show()
+        if plot_importance == 1:
 
-        explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_test)
-        shap.summary_plot(shap_values, X_test,
-                          feature_names=df.drop(columns=['date', target_column]).columns)
-        plt.show()
+            sorted_feature_importance = model.feature_importances_.argsort()
+            plt.barh(self.df.drop(columns=['date', target_column]).columns,
+                     model.feature_importances_[sorted_feature_importance],
+                     color='turquoise')
+            plt.xlabel("CatBoost Feature Importance")
+            plt.show()
+
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_test)
+            shap.summary_plot(shap_values, X_test,
+                              feature_names=self.df.drop(columns=['date', target_column]).columns)
+            plt.show()
+
+        if plot_detailed_predict == 1:
+            sample_size_list = []
+
+            df_test_res = pd.concat([pd.concat([X_test, y_test], axis=1).reset_index().drop(columns='index'),
+                              pd.DataFrame(pred).reset_index().drop(columns='index')], axis=1)
+            df_test_res = df_test_res.rename(columns={0: 'predict'})
+
+            if 'lifetime' not in df_test_res.columns:
+                for d in sorted(df_test_res['days_in_cohort'].unique()):
+                    df_test_res_f = df_test_res.query(f'days_in_cohort == {d}')
+                    sample_size_list.append(self.regression_basic_metrics(df_test_res_f['fee_attr_180'],
+                                                                          df_test_res_f['predict']))
+                plt.figure(figsize=(20, 8))
+
+                x = sorted(df_test_res['days_in_cohort'].unique())
+                y_min = [min(k['diff_perc']) for k in sample_size_list]
+                y_max = [max(k['diff_perc']) for k in sample_size_list]
+
+                plt.plot(x, y_min, label='Error 0.025 quantile')
+                for index in range(len(x)):
+                    plt.text(x[index], y_min[index],
+                             s=[round(min(k['diff_perc'])) for k in sample_size_list][index])
+                plt.plot(x, y_max, label='Error 0.975 quantile')
+                for index in range(len(x)):
+                    plt.text(x[index], y_max[index],
+                             s=[round(max(k['diff_perc'])) for k in sample_size_list][index])
+                plt.legend()
+                plt.show()
+            else:
+                for l in sorted(df_test_res['lifetime'].unique()):
+                    sample_size_list = []
+                    df_test_res_tmp = df_test_res.query(f'lifetime == {l}')
+                    for d in sorted(df_test_res_tmp['days_in_cohort'].unique()):
+                        df_test_res_f = df_test_res_tmp.query(f'days_in_cohort == {d}')
+                        sample_size_list.append(self.regression_basic_metrics(df_test_res_f['fee_attr_180'],
+                                                                              df_test_res_f['predict']))
+                    plt.figure(figsize=(20, 8))
+
+                    x = sorted(df_test_res_tmp['days_in_cohort'].unique())
+                    y_min = [min(k['diff_perc']) for k in sample_size_list]
+                    y_max = [max(k['diff_perc']) for k in sample_size_list]
+
+                    plt.plot(x, y_min, label='Error 0.025 quantile')
+                    for index in range(len(x)):
+                        plt.text(x[index], y_min[index],
+                                 s=[round(min(k['diff_perc'])) for k in sample_size_list][index])
+                    plt.plot(x, y_max, label='Error 0.975 quantile')
+                    for index in range(len(x)):
+                        plt.text(x[index], y_max[index],
+                                 s=[round(max(k['diff_perc'])) for k in sample_size_list][index])
+                    plt.legend()
+                    plt.show()
 
         return pred, self.regression_basic_metrics(y_test, pred)
 
