@@ -234,6 +234,7 @@ class Prediction:
                     y_min = [min(k['diff_perc']) for k in sample_size_list]
                     y_max = [max(k['diff_perc']) for k in sample_size_list]
 
+                    plt.title(f'Lifetime == {l}')
                     plt.plot(x, y_min, label='Error 0.025 quantile')
                     for index in range(len(x)):
                         plt.text(x[index], y_min[index],
