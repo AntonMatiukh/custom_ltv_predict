@@ -146,7 +146,7 @@ class Prediction:
             df_tmp_g = df_tmp_g.drop(columns=target_column).merge(df_target, how='inner', on=cat_features)
             df_tmp_g['days_in_cohort'] = k
             if n is not None:
-                df_tmp_g['lifetime'] = n
+                df_tmp_g['cohort_lifetime'] = n
 
             df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
 
@@ -236,7 +236,7 @@ class Prediction:
                               pd.DataFrame(pred).reset_index().drop(columns='index')], axis=1)
             df_test_res = df_test_res.rename(columns={0: 'predict'})
 
-            if 'lifetime' not in df_test_res.columns:
+            if 'cohort_lifetime' not in df_test_res.columns:
                 for d in sorted(df_test_res['days_in_cohort'].unique()):
                     df_test_res_f = df_test_res.query(f'days_in_cohort == {d}')
                     sample_size_list.append(self.regression_basic_metrics(df_test_res_f['fee_attr_180'],
@@ -258,9 +258,9 @@ class Prediction:
                 plt.legend()
                 plt.show()
             else:
-                for l in sorted(df_test_res['lifetime'].unique()):
+                for l in sorted(df_test_res['cohort_lifetime'].unique()):
                     sample_size_list = []
-                    df_test_res_tmp = df_test_res.query(f'lifetime == {l}')
+                    df_test_res_tmp = df_test_res.query(f'cohort_lifetime == {l}')
                     for d in sorted(df_test_res_tmp['days_in_cohort'].unique()):
                         df_test_res_f = df_test_res_tmp.query(f'days_in_cohort == {d}')
                         sample_size_list.append(self.regression_basic_metrics(df_test_res_f['fee_attr_180'],
