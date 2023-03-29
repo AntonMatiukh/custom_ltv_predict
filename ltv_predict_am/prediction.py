@@ -117,7 +117,7 @@ class Prediction:
             df_tmp_g[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
             df_tmp_g['days_in_cohort'] = k
             if n is not None:
-                df_tmp_g['lifetime'] = n
+                df_tmp_g['cohort_lifetime'] = n
 
             df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
 
