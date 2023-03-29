@@ -93,7 +93,7 @@ class Prediction:
             print('Negative lifetimes were deleted from df')
 
 
-    def df_calc(self, df, target_column, k, n, df_list):
+    def df_calc(self, df, target_column, k, n, df_list, cat_features):
         """
         Function for calculations
 
@@ -102,26 +102,58 @@ class Prediction:
         :return:
         """
 
-        df_tmp_g = df.groupby('lifetime', as_index=False).sum()
+        if cat_features is None:
 
-        for c in df_tmp_g.drop(columns=['lifetime', target_column]):
-            df_tmp_g[c] = df_tmp_g[c].cumsum()
-            coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
-            df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
-            df_tmp_g = df_tmp_g.drop(columns=c)
+            df_tmp_g = df.groupby('lifetime', as_index=False).sum()
 
-        df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
-                           str(df['date_'].max()).split(' ')[0]
-        df_tmp_g[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
-        df_tmp_g['days_in_cohort'] = k
-        if n is not None:
-            df_tmp_g['lifetime'] = n
+            for c in df_tmp_g.drop(columns=['lifetime', target_column]):
+                df_tmp_g[c] = df_tmp_g[c].cumsum()
+                coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
+                df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
+                df_tmp_g = df_tmp_g.drop(columns=c)
 
-        df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
+            df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
+                               str(df['date_'].max()).split(' ')[0]
+            df_tmp_g[target_column] = df.groupby('date_reg', as_index=False)[target_column].max()[target_column].sum()
+            df_tmp_g['days_in_cohort'] = k
+            if n is not None:
+                df_tmp_g['lifetime'] = n
 
-        df_list.append(df_tmp_g)
+            df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
 
-    def get_final_df(self, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime, target_column):
+            df_list.append(df_tmp_g)
+
+        else:
+
+            df_tmp_g = df.groupby([cat_features]+['lifetime'], as_index=False).sum()
+
+            cat_list = []
+            for f in df_tmp_g[cat_features].unique():
+                df_cat = df_tmp_g[df_tmp_g[cat_features] == f]
+                for c in df_cat.drop(columns=[cat_features]+['lifetime', target_column]):
+                    df_cat[c] = df_cat[c].cumsum()
+                    coeffs = self.calc_slope_intercept(df_cat['lifetime'] + 1, df_cat[c])
+                    df_cat[f'{c}_a'], df_cat[f'{c}_b'] = coeffs[0], coeffs[1]
+                    df_cat = df_cat.drop(columns=c)
+                cat_list.append(df_cat)
+
+            df_tmp_g = pd.concat(cat_list)
+
+            df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
+                               str(df['date_'].max()).split(' ')[0]
+            df_target = df.groupby([cat_features]+['date_reg'], as_index=False)[target_column].max()\
+                        .groupby(cat_features, as_index=False)[target_column].sum()
+            df_tmp_g = df_tmp_g.drop(columns=target_column).merge(df_target, how='inner', on=cat_features)
+            df_tmp_g['days_in_cohort'] = k
+            if n is not None:
+                df_tmp_g['lifetime'] = n
+
+            df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
+
+            df_list.append(df_tmp_g)
+
+    def get_final_df(self, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime,
+                     target_column, cat_features):
         """
         Create/replace new features
 
@@ -138,7 +170,8 @@ class Prediction:
                 for d in self.df['date_reg'].unique():
                     df_tmp = self.df[(self.df['date_reg'] >= d)
                                      & (self.df['date_'] <= d + pd.DateOffset(k))]
-                    self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None, df_list=df_list)
+                    self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None,
+                                 df_list=df_list, cat_features=cat_features)
         else:
             for k in log_progress(range(min_cohort_days, max_cohort_days)):
                 for n in range(min_lifetime, max_lifetime):
@@ -146,13 +179,14 @@ class Prediction:
                         df_tmp = self.df[(self.df['date_reg'] >= d)
                                          & (self.df['date_reg'] <= d + pd.DateOffset(k))
                                          & (self.df['date_'] <= d + pd.DateOffset(k+n))]
-                        self.df_calc(df=df_tmp, target_column=target_column, k=k, n=n, df_list=df_list)
+                        self.df_calc(df=df_tmp, target_column=target_column, k=k, n=n,
+                                     df_list=df_list, cat_features=cat_features)
 
         self.df = pd.concat(df_list).drop_duplicates()
 
         return self.df
 
-    def make_basic_predict(self,test_size,random_state,target_column,plot_importance,plot_detailed_predict):
+    def make_basic_predict(self,test_size,random_state,target_column,plot_importance,plot_detailed_predict,cat_features):
         """
         Function to make basic predict based on CatBoostRegressor
 
@@ -168,8 +202,8 @@ class Prediction:
                                                             test_size=test_size,
                                                             random_state=random_state)
 
-        train_dataset = cb.Pool(X_train, y_train)
-        test_dataset = cb.Pool(X_test, y_test)
+        train_dataset = cb.Pool(X_train, y_train, cat_features=cat_features)
+        # test_dataset = cb.Pool(X_test, y_test)
 
         model = cb.CatBoostRegressor(loss_function='RMSE', silent=True)
 
