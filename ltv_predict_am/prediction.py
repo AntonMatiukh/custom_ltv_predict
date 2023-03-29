@@ -202,8 +202,11 @@ class Prediction:
                                                             test_size=test_size,
                                                             random_state=random_state)
 
-        train_dataset = cb.Pool(X_train, y_train, cat_features=cat_features)
-        # test_dataset = cb.Pool(X_test, y_test)
+        if cat_features is None:
+            train_dataset = cb.Pool(X_train, y_train)
+        else:
+            train_dataset = cb.Pool(X_train, y_train, cat_features=[X_train.columns.get_loc(cat_features)])
+        # test_dataset = cb.Pool(X_test, y_test, cat_features=[X_test.columns.get_loc(cat_features)])
 
         model = cb.CatBoostRegressor(loss_function='RMSE', silent=True)
 
