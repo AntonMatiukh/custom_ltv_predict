@@ -104,12 +104,17 @@ class Prediction:
 
         if cat_features is None:
 
-            df_tmp_g = df.groupby('lifetime', as_index=False).sum()
+            df_tmp_g = df.groupby('lifetime').agg(['sum','mean',np.median]).reset_index()
+            df_tmp_g.columns = [k[0]+'_'+k[1] if k[1] != '' else k[0] for k in df_tmp_g.columns]
 
-            for c in df_tmp_g.drop(columns=['lifetime', target_column]):
+            columns_to_drop = [c for c in df_tmp_g.columns if target_column in c]+['lifetime']
+
+            for c in df_tmp_g.drop(columns=columns_to_drop):
                 df_tmp_g[c] = df_tmp_g[c].cumsum()
-                coeffs = self.calc_slope_intercept(df_tmp_g['lifetime'] + 1, df_tmp_g[c])
+                coeffs = self.calc_slope_intercept(df_tmp_g.index + 1, df_tmp_g[c])
                 df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
+                if '_sum' in c:
+                    df_tmp_g[f'{c}_sum'] = df_tmp_g[c].max()
                 df_tmp_g = df_tmp_g.drop(columns=c)
 
             df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
@@ -119,7 +124,7 @@ class Prediction:
             if n is not None:
                 df_tmp_g['cohort_lifetime'] = n
 
-            df_tmp_g = df_tmp_g.drop(columns=['lifetime']).drop_duplicates()
+            df_tmp_g = df_tmp_g.drop(columns=columns_to_drop).drop_duplicates()
 
             df_list.append(df_tmp_g)
 
