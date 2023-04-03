@@ -113,7 +113,8 @@ class Prediction:
                 df_tmp_g[c] = df_tmp_g[c].cumsum()
                 coeffs = self.calc_slope_intercept(df_tmp_g.index + 1, df_tmp_g[c])
                 df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
-                df_tmp_g[f'{c}_max'] = df_tmp_g[c].max()
+                if '_sum' in c:
+                    df_tmp_g[f'{c}_max'] = df_tmp_g[c].max()
                 df_tmp_g = df_tmp_g.drop(columns=c)
 
             for j in custom_features.keys():
