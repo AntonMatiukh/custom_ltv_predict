@@ -93,7 +93,7 @@ class Prediction:
             print('Negative lifetimes were deleted from df')
 
 
-    def df_calc(self, df, target_column, k, n, df_list, cat_features):
+    def df_calc(self, df, target_column, k, n, df_list, cat_features, custom_features):
         """
         Function for calculations
 
@@ -113,9 +113,11 @@ class Prediction:
                 df_tmp_g[c] = df_tmp_g[c].cumsum()
                 coeffs = self.calc_slope_intercept(df_tmp_g.index + 1, df_tmp_g[c])
                 df_tmp_g[f'{c}_a'], df_tmp_g[f'{c}_b'] = coeffs[0], coeffs[1]
-                if '_sum' in c:
-                    df_tmp_g[f'{c}_sum'] = df_tmp_g[c].max()
+                df_tmp_g[f'{c}_max'] = df_tmp_g[c].max()
                 df_tmp_g = df_tmp_g.drop(columns=c)
+
+            for j in custom_features.keys():
+                df_tmp_g[j] = df_tmp_g[custom_features[j].split(';')[0]] / df_tmp_g[custom_features[j].split(';')[1]]
 
             df_tmp_g['date'] = str(df['date_'].min()).split(' ')[0] + ' - ' + \
                                str(df['date_'].max()).split(' ')[0]
@@ -158,7 +160,7 @@ class Prediction:
             df_list.append(df_tmp_g)
 
     def get_final_df(self, is_closed_lifetime, min_cohort_days, max_cohort_days, min_lifetime, max_lifetime,
-                     target_column, cat_features):
+                     target_column, cat_features, custom_features):
         """
         Create/replace new features
 
@@ -176,7 +178,7 @@ class Prediction:
                     df_tmp = self.df[(self.df['date_reg'] >= d)
                                      & (self.df['date_'] <= d + pd.DateOffset(k))]
                     self.df_calc(df=df_tmp, target_column=target_column, k=k, n=None,
-                                 df_list=df_list, cat_features=cat_features)
+                                 df_list=df_list, cat_features=cat_features, custom_features=custom_features)
         else:
             for k in log_progress(range(min_cohort_days, max_cohort_days)):
                 for n in range(min_lifetime, max_lifetime):
@@ -185,7 +187,7 @@ class Prediction:
                                          & (self.df['date_reg'] <= d + pd.DateOffset(k))
                                          & (self.df['date_'] <= d + pd.DateOffset(k+n))]
                         self.df_calc(df=df_tmp, target_column=target_column, k=k, n=n,
-                                     df_list=df_list, cat_features=cat_features)
+                                     df_list=df_list, cat_features=cat_features, custom_features=custom_features)
 
         self.df = pd.concat(df_list).drop_duplicates()
 
